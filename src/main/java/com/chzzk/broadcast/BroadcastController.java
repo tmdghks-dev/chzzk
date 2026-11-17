@@ -1,6 +1,9 @@
 package com.chzzk.broadcast;
 
 import com.chzzk.comment.CommentRepository;
+import com.chzzk.donation.Donation;
+import com.chzzk.donation.DonationRepository;
+import com.chzzk.donation.DonationStatus;
 import com.chzzk.member.Member;
 import com.chzzk.member.MemberRepository;
 import jakarta.servlet.http.HttpSession;
@@ -10,18 +13,22 @@ import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.List;
+
 @Controller
 @RequestMapping("/broadcasts")
 public class BroadcastController {
     private final BroadcastRepository broadcastRepository;
     private final MemberRepository memberRepository;
-    private final CommentRepository commentRepository;   // ← 새로 추가
+    private final CommentRepository commentRepository;
+    private final DonationRepository donationRepository;   // ← 새로 추가
 
     public BroadcastController(BroadcastRepository broadcastRepository, MemberRepository memberRepository,
-                               CommentRepository commentRepository) {
+                               CommentRepository commentRepository, DonationRepository donationRepository) {
         this.broadcastRepository = broadcastRepository;
         this.memberRepository = memberRepository;
-        this.commentRepository = commentRepository;       // ← 새로 추가
+        this.commentRepository = commentRepository;
+        this.donationRepository = donationRepository;      // ← 새로 추가
     }
 
     @GetMapping
@@ -48,7 +55,12 @@ public class BroadcastController {
     @GetMapping("/{id}")
     public String detail(@PathVariable Long id, Model model) {
         model.addAttribute("broadcast", broadcastRepository.findById(id).orElseThrow());
-        model.addAttribute("comments", commentRepository.findByBroadcastIdOrderByIdAsc(id));  // ← 새로 추가
+        model.addAttribute("comments", commentRepository.findByBroadcastIdOrderByIdAsc(id));
+
+        // ↓ 새로 추가: 확정(DONE)된 후원만 + 합계
+        List<Donation> donations = donationRepository.findByBroadcastIdAndStatusOrderByIdDesc(id, DonationStatus.DONE);
+        model.addAttribute("donations", donations);
+        model.addAttribute("donationTotal", donations.stream().mapToLong(Donation::getAmount).sum());
         return "broadcast/detail";
     }
 

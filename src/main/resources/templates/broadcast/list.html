@@ -3,6 +3,13 @@
 <head><meta charset="UTF-8"><title>치지직</title></head>
 <body>
 <h1>방송 목록</h1>
+<div th:if="${session.memberId}">
+    <span th:text="${session.username} + '님'"></span>
+    <form method="post" action="/logout" style="display:inline"><button>로그아웃</button></form>
+</div>
+<div th:unless="${session.memberId}">
+    <a href="/login">로그인</a> | <a href="/signup">회원가입</a>
+</div>
 <a href="/broadcasts/new">+ 방송 등록</a>
 <ul>
     <li th:each="b : ${broadcasts}">

@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head><meta charset="UTF-8"><title>치지직</title></head>
+<body>
+<h1>방송 목록</h1>
+<a href="/broadcasts/new">+ 방송 등록</a>
+<ul>
+    <li th:each="b : ${broadcasts}">
+        <a th:href="@{/broadcasts/{id}(id=${b.id})}" th:text="${b.title}">제목</a>
+    </li>
+</ul>
+</body>
+</html>

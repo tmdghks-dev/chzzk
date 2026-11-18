@@ -1,204 +1,220 @@
-# 치지직 클론 — ① 녹화방송 · ② 휴대폰 라이브 · ③ 인증·인가와 댓글 · ④ 도네이션 · ⑤ 로컬 오토스케일
+# 치지직 클론
 
-Spring Boot 4.1 · Java 25 · Thymeleaf · Spring Data JPA · H2(파일 DB) · 토스페이먼츠 결제위젯(테스트 모드)
+치지직처럼 방송을 올리고, 휴대폰으로 라이브를 켜고, 후원까지 할 수 있는 사이트를 만들어 봤습니다.
 
-5단계(클러스터 모드): Docker 이미지 · kind(로컬 Kubernetes) · PostgreSQL · Spring Session JDBC · HPA · k6 — [아래 5단계](#5단계-로컬-오토스케일) 참고. 프로필 없이 실행하면 위 H2 구성 그대로입니다.
+| 단계 | 만든 것 |
+| --- | --- |
+| ① 녹화방송 | 영상 URL로 방송 등록, 목록, 재생 |
+| ② 휴대폰 라이브 | 휴대폰 카메라로 송출하고 PC에서 실시간 시청 |
+| ③ 로그인·권한·댓글 | 회원가입/로그인, 내 방송만 삭제, 로그인해야 댓글 |
+| ④ 도네이션 | 토스페이먼츠 테스트 결제로 방송자에게 후원 |
+| ⑤ 오토스케일 | 부하가 오르면 서버가 2개 → 5개로 자동으로 늘어남 |
 
-## 실행 방법
+**사용 기술**: Spring Boot 4.1, Java 25, Thymeleaf, Spring Data JPA, H2(파일 DB), WebSocket, WebRTC, 토스페이먼츠 결제위젯
+⑤단계만 Docker, kind(로컬 쿠버네티스), PostgreSQL, k6를 추가로 썼습니다.
+
+---
+
+## 실행하는 법
 
 1. JDK 25를 설치합니다.
-2. `src/main/resources/application-secret.properties` 파일을 만들고 토스 **결제위젯 연동 키(테스트)** 를 넣습니다. 이 파일은 `.gitignore`에 들어 있어 커밋되지 않습니다.
+2. `src/main/resources/application-secret.properties` 파일을 만들고 토스 **결제위젯 테스트 키**를 넣습니다.
+   이 파일은 `.gitignore`에 넣어 놔서 깃에 올라가지 않습니다.
+   ```properties
+   toss.client-key=test_gck_xxxxxxxxxxxxxxxxxxxx
+   toss.secret-key=test_gsk_xxxxxxxxxxxxxxxxxxxx
+   ```
+   파일 대신 환경변수로 넣어도 됩니다.
+   ```bash
+   export TOSS_CLIENT_KEY=test_gck_xxxxxxxxxxxxxxxxxxxx
+   export TOSS_SECRET_KEY=test_gsk_xxxxxxxxxxxxxxxxxxxx
+   ```
 3. 실행합니다.
    ```bash
    ./gradlew bootRun
    ```
-4. 브라우저에서 <http://localhost:8091/broadcasts> 를 엽니다.
+4. <http://localhost:8091/broadcasts> 로 들어가면 됩니다.
 
-### 환경변수 / 설정 예시
+### 밖에서 접속하기 (Cloudflare Tunnel)
 
-`application-secret.properties` 대신 환경변수로 넣어도 됩니다.
-
-```properties
-# application-secret.properties
-toss.client-key=test_gck_xxxxxxxxxxxxxxxxxxxx
-toss.secret-key=test_gsk_xxxxxxxxxxxxxxxxxxxx
-```
-
-```bash
-export TOSS_CLIENT_KEY=test_gck_xxxxxxxxxxxxxxxxxxxx
-export TOSS_SECRET_KEY=test_gsk_xxxxxxxxxxxxxxxxxxxx
-```
-
-### 외부 공개 (Cloudflare Tunnel)
+휴대폰 카메라는 https 주소에서만 켜져서, 라이브를 하려면 터널이 필요합니다.
 
 ```bash
 brew install cloudflared
 cloudflared tunnel --url http://localhost:8091
 ```
 
-출력되는 `https://<임의이름>.trycloudflare.com` 주소로 접속합니다. 결제 성공·실패 주소는 `location.origin` 기준으로 만들어지므로 터널 주소에서도 그대로 동작합니다.
+출력에 나오는 `https://<랜덤이름>.trycloudflare.com` 주소로 들어가면 됩니다. 터널을 껐다 켜면 주소가 바뀝니다.
 
-## 구현 범위
+---
 
-| 단계 | 내용 | 주요 코드 |
-| --- | --- | --- |
-| ① 녹화방송 | 제목 + 영상 URL 등록, 목록, 상세에서 `<video>` 재생, H2 파일 DB에 저장(재시작 후 유지) | `broadcast/Broadcast`, `BroadcastController` |
-| ③ 인증·인가 | 회원가입·로그인·로그아웃(HttpSession, BCrypt 암호화) | `member/*` |
-| ③ 권한 | 방송 등록은 로그인 필요, 방송 삭제는 **서버에서 소유자 검사**(아니면 403) | `BroadcastController.create/delete` |
-| ③ 댓글 | 로그인 사용자만 작성(비로그인은 서버에서 401), 방송별 댓글 목록 | `comment/*` |
-| ④ 도네이션 | 로그인 사용자가 방송자에게 금액을 정해 후원, 토스 결제위젯 테스트 결제 | `donation/*`, `templates/donation/checkout.html` |
-| ④ 서버 확정 | 성공 리다이렉트 후 서버가 주문서와 금액·수신자를 비교하고, 토스 **결제 승인 API**를 호출해 응답(`DONE`·금액·주문번호)까지 확인한 뒤에만 `DONE`으로 확정 | `DonationController.success`, `TossClient` |
-| ④ 중복 방지 | 주문번호(`orderId`)·결제키(`paymentKey`) DB unique, 이미 `DONE`인 주문은 다시 처리하지 않음 | `Donation`, `DonationController.success` |
-| ④ 내역·합계 | 방송 상세에 확정된 후원 목록과 합계 표시 | `BroadcastController.detail`, `broadcast/detail.html` |
+## ① 녹화방송
 
-- ② 휴대폰 라이브는 [아래 2단계](#2단계-휴대폰-라이브-송출)에 따로 정리했습니다.
-- **공개 범위**: 방송 목록·시청·댓글 읽기·후원 내역은 로그인 없이 볼 수 있습니다. 방송 등록·삭제, 댓글 작성, 후원은 로그인이 필요합니다.
+- 제목과 영상 URL을 넣으면 방송이 등록되고, 상세 화면에서 `<video>`로 재생됩니다.
+- H2를 파일 DB로 써서 서버를 껐다 켜도 데이터가 남아 있습니다.
+- 코드: `broadcast/Broadcast`, `BroadcastController`
 
-### 후원 상태
+## ② 휴대폰 라이브
 
-| 상태 | 의미 |
+휴대폰 브라우저 카메라로 방송을 켜면 PC 브라우저에서 실시간으로 볼 수 있습니다. 앱 설치는 필요 없습니다.
+
+### 어떻게 동작하나
+
+```
+📱 휴대폰(방송자) ──① 연결 정보만 주고받음 (WebSocket)──▶ 🖥️ 서버 ◀── 💻 PC(시청자)
+📱 휴대폰 ━━━━━━━━━━━━━② 영상은 직접 감 (WebRTC P2P)━━━━━━━━━━━━━━━▶ 💻 PC
+```
+
+- **영상은 서버를 거치지 않습니다.** 휴대폰에서 시청자 브라우저로 바로 갑니다(WebRTC P2P).
+- 서버는 서로 연결할 수 있게 **쪽지(offer / answer / ICE)만 전달**합니다. 주소는 `/ws/live`입니다.
+- 내 인터넷 주소를 알아내는 데는 구글 STUN 서버(`stun.l.google.com:19302`)를 씁니다.
+
+### 송출 권한
+
+- 라이브를 만들면 서버가 **방송 키(UUID)** 를 하나 만들어 줍니다.
+- 이 키가 있어야 송출 접속과 방송 종료를 할 수 있습니다. 키가 틀리면 403이 나거나 연결이 끊깁니다.
+- 시청은 키 없이 누구나 할 수 있습니다.
+
+### 방송 상태
+
+- 방송 중이면 `ON_AIR`, 방송자가 종료하면 `ENDED`가 됩니다.
+- 목록에 🔴(방송 중) / (종료)로 표시됩니다. 종료된 방송을 열면 "종료된 방송이에요"가 나옵니다.
+
+### 주소 정리
+
+| 주소 | 하는 일 |
 | --- | --- |
-| `READY` | 주문서 생성(결제 전). 금액·수신자를 서버가 기록 |
-| `DONE` | 토스 승인까지 확인된 확정 후원. 내역·합계에 포함 |
-| `FAILED` | 결제 실패 또는 금액 불일치 |
-| `CANCELED` | 사용자가 결제창을 닫음 |
+| `/lives/new` | 라이브 만들기 (제목 입력 → 키 발급 → 송출 화면으로 이동) |
+| `/lives/{id}/broadcast?key=...` | 송출 화면. 카메라·마이크 켜기, 전면/후면 카메라 전환, 시청자 수 표시 |
+| `/lives/{id}` | 시청 화면 |
+| `POST /lives/{id}/end` | 방송 종료 (키 필요) |
+| `/ws/live` | 연결 정보 주고받는 WebSocket |
 
-## 직접 확인 절차
+코드: `live/LiveController`, `live/LiveSignalingHandler`, `templates/live/*`
 
-1. **녹화방송**: 로그인 → `+ 방송 등록` → 제목과 영상 URL(예: `https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4`) 입력 → 상세에서 재생 → 앱 재시작 후에도 목록에 남아 있는지 확인
-2. **권한**: 계정 A로 방송 등록 → 계정 B로 로그인해 같은 방송에서 삭제 버튼이 안 보이는지 확인. 버튼 없이 직접 요청해도 403인지 확인
-   ```bash
-   curl -i -X POST http://localhost:8091/broadcasts/1/delete   # 비로그인 → 403
-   ```
-3. **댓글**: 비로그인 상태에서는 입력칸이 없고, 직접 요청하면 401
-   ```bash
-   curl -i -X POST -d "content=hi" http://localhost:8091/broadcasts/1/comments   # → 401
-   ```
-4. **테스트 결제 성공**: 로그인 → 주인이 있는 방송 상세 → 금액 입력 → `후원하기` → 결제위젯에서 카드 결제 → 상세로 돌아와 후원 내역과 합계가 늘었는지 확인
-5. **결제 취소**: `후원하기` → 결제창을 닫음 → "결제가 완료되지 않았어요" 화면, 합계 변화 없음(주문은 `CANCELED`)
-6. **결제 실패 / 금액 조작**: 성공 리다이렉트 주소의 `amount` 값을 바꿔 접속 → "결제 금액이 주문과 달라요", 합계 변화 없음(주문은 `FAILED`)
-7. **승인 통지 중복**: 결제 성공 후 브라우저 방문 기록(Cmd+Y)에서 `/donations/success?paymentKey=...` 주소를 다시 열기 → 합계가 늘지 않음
-## 2단계: 휴대폰 라이브 송출
+### 주의할 점
 
-휴대폰 브라우저 카메라로 송출하고 다른 기기 브라우저에서 실시간으로 봅니다. 앱 설치 없이 웹만 씁니다.
+- 휴대폰 카메라는 **https에서만** 켜집니다. 그래서 위 터널 주소로 접속해야 합니다.
+- 터널을 거치면 WebSocket이 403으로 막혀서 `server.forward-headers-strategy=native`를 켜 뒀습니다. 터널이 붙여 주는 "원래 https였다"는 정보를 서버가 믿게 하는 설정입니다.
+- 카메라·마이크 권한을 **허용**해야 합니다. 아이폰은 화면이 꺼지거나 Safari가 백그라운드로 가면 송출이 끊깁니다.
+- 중계 서버(TURN)가 없어서 방화벽이 빡빡한 네트워크끼리는 연결이 안 될 수 있습니다. 같은 와이파이에서 제일 잘 됩니다.
+- 연결 목록을 서버 메모리에 들고 있어서, ⑤처럼 서버를 여러 대로 늘리면 방송자와 시청자가 서로를 못 찾습니다. 라이브는 서버 한 대 기준입니다.
 
-### 구조
-
-- **영상**: WebRTC P2P. 휴대폰 → 시청자 브라우저로 직접 갑니다. 서버는 영상을 받지 않습니다.
-- **시그널링**: 서버의 WebSocket(`/ws/live`)이 연결 정보(offer / answer / ICE)만 전달합니다. STUN은 `stun.l.google.com:19302`.
-- **송출 권한**: 라이브를 만들 때 서버가 **방송 키(UUID)** 를 발급합니다. 송출 접속(WebSocket)과 종료 요청은 이 키가 맞을 때만 받습니다(아니면 403 / 연결 끊음). 시청은 키 없이 누구나 가능합니다.
-- **상태**: `ON_AIR`(방송 중) → 방송자가 종료하면 `ENDED`. 목록(`/broadcasts`)에 상태가 보이고, 종료된 라이브는 시청 화면에 "종료된 방송"으로 나옵니다.
-
-| 주소 | 내용 |
-| --- | --- |
-| `GET /lives/new` → `POST /lives` | 라이브 생성, 키 발급, 송출 화면으로 이동 |
-| `GET /lives/{id}/broadcast?key=` | 송출 화면(카메라·마이크, 전면/후면 전환, 시청자 수) |
-| `GET /lives/{id}` | 시청 화면 |
-| `POST /lives/{id}/end` (key) | 종료 |
-| `WS /ws/live?liveId=&role=broadcaster&key=` / `role=viewer` | 시그널링 |
-
-주요 코드: `live/LiveController`, `live/LiveSignalingHandler`, `templates/live/*`
-
-### 연결 환경
-
-- 휴대폰 카메라는 **https에서만** 켜집니다. 위 Cloudflare Tunnel 주소로 접속합니다. 터널 뒤에서 WebSocket 출처 검사가 통과하도록 `server.forward-headers-strategy=native`를 켜 두었습니다.
-- 카메라·마이크 권한을 **허용**해야 합니다. 아이폰은 Safari 화면이 꺼지거나 백그라운드로 가면 송출이 끊깁니다.
-- TURN 서버가 없어서, 회사망처럼 방화벽이 엄격한 네트워크 사이에서는 연결이 안 될 수 있습니다. 같은 와이파이에서 가장 잘 됩니다.
-- 시그널링 연결 목록은 서버 메모리에 있습니다. 5단계처럼 여러 인스턴스로 늘리면 방송자와 시청자가 서로 못 찾으므로, 라이브는 단일 인스턴스 기준입니다.
-
-### 직접 확인 절차
+### 확인하는 법
 
 1. 휴대폰에서 `https://<터널주소>/lives/new` → 제목 입력 → `방송 시작` → `카메라 켜고 송출 시작` → 권한 허용
-2. PC에서 `/broadcasts` → 라이브의 🔴 제목 클릭(또는 송출 화면의 시청 주소) → 영상이 나오는지, 휴대폰의 시청자 수가 늘었는지 확인
-3. 휴대폰에서 `카메라 전환` → PC 화면이 끊김 없이 바뀌는지 확인
+2. PC에서 `/broadcasts` → 🔴 방송 클릭 → 영상이 나오는지, 휴대폰에 시청자 수가 올라가는지 확인
+3. 휴대폰에서 `카메라 전환` → PC 화면이 끊기지 않고 바뀌는지 확인
 4. 휴대폰에서 `방송 종료` → PC에 "방송이 종료됐어요", 목록에 `(종료)` 표시
-5. 키 없이 종료 시도 → 403
+5. 키 없이 종료하면 403
    ```bash
    curl -i -X POST -d "key=wrong" http://localhost:8091/lives/1/end   # → 403
    ```
 
-### 실제 확인 기록 (2026-11-19)
+### 직접 해 본 결과 (2026-11-19)
 
-- 아이폰(Safari, 터널 https) 후면 카메라 송출 → PC 시청자 2명(localhost, 터널 주소) 동시 연결: 둘 다 `connected`, 영상 480×640 + 소리 수신
-- 시그널링 부하 테스트(`scripts/live-load.sh`, k6): 가짜 방송자 1명 + 가짜 시청자를 200 → 3,000명 동시 접속까지 단계적으로 늘림. 접속 12,945회, offer 전달 성공 100%, 접속→offer 지연 p95 4ms, 서버 CPU 최고 약 40%(코어 1개 기준), 메모리 약 600MB. 3,000명까지 한계에 닿지 않았습니다. 기록: `docs/live-load-*.txt`, `docs/live-load-summary.json`
-- 단, 영상은 P2P라 실제 시청자 수는 서버가 아니라 **휴대폰 업로드 성능**에 막힙니다(보통 몇 명 수준). 시청자가 많아지면 미디어 서버(SFU)가 필요합니다.
+- 아이폰(Safari, 터널 https)에서 후면 카메라로 송출하고, PC 시청자 2명(localhost, 터널 주소)이 동시에 봤습니다. 둘 다 연결 성공, 영상(480×640)과 소리가 잘 들어왔습니다.
+- **서버가 몇 명까지 버티는지** k6로 테스트해 봤습니다(`scripts/live-load.sh`).
+  - 가짜 방송자 1명에 가짜 시청자를 200 → 500 → 1,000 → 2,000 → 3,000명까지 늘렸습니다.
+  - 접속 12,945번, 연결 정보 전달 **성공 100%**, 전달 시간 **95%가 4ms 안**이었습니다.
+  - 서버 CPU는 최고 약 40%(코어 1개 기준), 메모리 약 600MB로, 3,000명까지도 버텼습니다.
+  - 기록: `docs/live-load-k6.txt`, `docs/live-load-cpu.txt`, `docs/live-load-summary.json`
+- 서버는 쪽지만 전달해서 가볍지만, **영상은 휴대폰이 시청자마다 따로 보내야 해서** 실제로는 휴대폰 쪽이 먼저 한계에 걸립니다(보통 몇 명 수준). 시청자가 많아지면 미디어 서버(SFU)가 따로 필요합니다.
 
-## 5단계: 로컬 오토스케일
+## ③ 로그인·권한·댓글
 
-부하에 따라 서버 인스턴스 수가 2~5개 사이에서 자동으로 늘고 줄어듭니다. 상태(회원·방송·댓글·후원·로그인 세션)는 모두 인스턴스 밖 PostgreSQL에 있어 인스턴스가 바뀌어도 유지됩니다.
+- 회원가입/로그인/로그아웃은 세션(HttpSession)으로 처리하고, 비밀번호는 BCrypt로 암호화해서 저장합니다.
+- 방송 등록은 로그인해야 할 수 있습니다.
+- 방송 삭제는 **서버에서 방송 주인인지 검사**합니다. 주인이 아니면 403입니다. 화면에서 버튼만 숨긴 게 아니라 직접 요청해도 막힙니다.
+- 댓글은 로그인한 사람만 쓸 수 있습니다. 로그인 없이 요청하면 401입니다.
+- 방송 목록, 시청, 댓글 읽기, 후원 내역은 로그인 없이도 볼 수 있습니다.
+- 코드: `member/*`, `comment/*`, `BroadcastController.create/delete`
+
+### 확인하는 법
+
+1. 계정 A로 방송 등록 → 계정 B로 로그인하면 그 방송에 삭제 버튼이 안 보입니다.
+2. 버튼 없이 직접 요청해도 막힙니다.
+   ```bash
+   curl -i -X POST http://localhost:8091/broadcasts/1/delete            # 로그인 안 함 → 403
+   curl -i -X POST -d "content=hi" http://localhost:8091/broadcasts/1/comments   # → 401
+   ```
+
+## ④ 도네이션 (토스페이먼츠 테스트 결제)
+
+로그인한 사람이 방송 상세에서 금액을 정해 방송자에게 후원할 수 있습니다.
+
+### 결제 흐름
+
+1. `후원하기`를 누르면 서버가 먼저 **주문서(READY)** 를 저장합니다. 금액과 받는 사람을 서버가 기록해 둡니다.
+2. 토스 결제위젯에서 결제합니다.
+3. 결제 성공으로 돌아오면 서버가 확인합니다.
+   - 주문서 금액과 같은지, 받는 사람이 맞는지
+   - 토스 **결제 승인 API**를 호출하고, 응답의 상태(`DONE`)·금액·주문번호까지 확인
+4. 전부 맞을 때만 후원이 **확정(DONE)** 되고 내역과 합계에 들어갑니다.
+
+### 후원 상태
+
+| 상태 | 뜻 |
+| --- | --- |
+| `READY` | 주문서만 만든 상태 (결제 전) |
+| `DONE` | 토스 승인까지 확인된 후원. 내역·합계에 포함 |
+| `FAILED` | 결제 실패, 또는 금액이 주문서와 다름 |
+| `CANCELED` | 사용자가 결제창을 닫음 |
+
+- 같은 결제가 두 번 처리되지 않게 주문번호와 결제키를 DB에서 중복 불가(unique)로 막았고, 이미 `DONE`인 주문은 다시 처리하지 않습니다.
+- 코드: `donation/*`, `TossClient`, `templates/donation/checkout.html`
+
+### 확인하는 법
+
+1. **결제 성공**: 로그인 → 방송 상세 → 금액 입력 → `후원하기` → 카드 결제 → 내역과 합계가 늘었는지 확인
+2. **결제 취소**: 결제창을 닫으면 "결제가 완료되지 않았어요", 합계 그대로
+3. **금액 조작**: 결제 성공 주소의 `amount`를 바꿔서 들어가면 "결제 금액이 주문과 달라요", 합계 그대로
+4. **중복 요청**: 결제 성공 주소를 방문 기록에서 다시 열어도 합계가 늘지 않음
+
+## ⑤ 오토스케일 (로컬 쿠버네티스)
+
+부하가 오르면 서버가 2개에서 최대 5개까지 자동으로 늘어나고, 부하가 끝나면 다시 2개로 줄어듭니다.
+회원, 방송, 댓글, 후원, 로그인 세션은 전부 서버 밖의 PostgreSQL에 저장해서 서버가 늘고 줄어도 그대로 유지됩니다.
 
 ```
-브라우저 → localhost:8092 → (kind 노드 30080) → Service chzzk → chzzk 파드 2~5개 ─┐
-                                                   HPA: CPU 평균 50% 기준으로 파드 수 조절  │
-                                                                     PostgreSQL(공용) ←──┘
+브라우저 → localhost:8092 → chzzk 서버 2~5개 → PostgreSQL(같이 씀)
+              (CPU 평균 50% 넘으면 서버 수를 늘림)
 ```
 
-| 요구사항 | 구현 | 파일 |
+| 필요한 것 | 어떻게 했나 | 파일 |
 | --- | --- | --- |
-| 컨테이너 이미지 | 빌드/실행 2단계 Dockerfile (`application-secret.properties`는 `.dockerignore`로 제외) | `Dockerfile`, `.dockerignore` |
-| 여러 인스턴스 실행 | kind 단일 노드 클러스터, Deployment `replicas: 2` | `k8s/kind-config.yaml`, `k8s/chzzk.yaml` |
-| 자동 스케일 | HPA `minReplicas 2`, `maxReplicas 5`, CPU 평균 사용률 50%, 부하가 1분간 낮으면 축소. 지표는 metrics-server | `k8s/chzzk.yaml`, `scripts/cluster-up.sh` |
-| 요청 분산 | Service `chzzk`(NodePort 30080)가 준비된 파드들에 나눠 보냄. 응답 헤더 `X-Chzzk-Instance`로 처리한 파드 확인 | `k8s/chzzk.yaml`, `InstanceHeaderFilter` |
-| 공용 저장소 | `cluster` 프로필에서 PostgreSQL 사용(PVC에 저장). 로그인 세션은 Spring Session JDBC로 DB `SPRING_SESSION` 테이블에 저장 | `application-cluster.properties`, `k8s/postgres.yaml`, `build.gradle` |
-| 부하 발생 | k6 Job: 가상 사용자 50명이 2분간 `/broadcasts` 요청 | `load/k6-load.js`, `k8s/k6-job.yaml`, `scripts/load.sh` |
+| 컨테이너 이미지 | 빌드용/실행용 2단계 Dockerfile. 시크릿 파일은 이미지에서 빼 둠 | `Dockerfile`, `.dockerignore` |
+| 서버 여러 대 | kind로 로컬 쿠버네티스를 만들고 서버 2개로 시작 | `k8s/kind-config.yaml`, `k8s/chzzk.yaml` |
+| 자동으로 늘리고 줄이기 | HPA: 최소 2개, 최대 5개, CPU 50% 기준. 부하가 1분간 낮으면 줄임 | `k8s/chzzk.yaml` |
+| 요청 나누기 | 쿠버네티스 Service가 서버들에 나눠 보냄. 응답 헤더 `X-Chzzk-Instance`에 처리한 서버 이름이 나옴 | `InstanceHeaderFilter` |
+| 데이터 같이 쓰기 | PostgreSQL 사용. 로그인 세션도 Spring Session JDBC로 DB에 저장 | `application-cluster.properties`, `k8s/postgres.yaml` |
+| 부하 주기 | k6로 가상 사용자 50명이 2분 동안 `/broadcasts` 요청 | `load/k6-load.js`, `scripts/load.sh` |
 
-- 영상은 1단계부터 URL로 등록하는 방식이라 별도 파일 저장소가 필요 없습니다(메타데이터는 DB).
-- ② 휴대폰 라이브는 구현하지 않아 라이브 상태 공유 대상이 없습니다.
+### 실행하는 법
 
-### 실행 방법 (클러스터)
-
-필요한 것: Docker Desktop(실행 중), `kind`(`brew install kind`), `kubectl`
+필요한 것: Docker Desktop(켜 둔 상태), `kind`(`brew install kind`), `kubectl`
 
 ```bash
-./scripts/cluster-up.sh      # 클러스터 생성 → 이미지 빌드·로드 → Secret → PostgreSQL → metrics-server → chzzk 2개 + HPA
-./scripts/load.sh            # k6 부하 2분 + 10초마다 CPU·파드 수 기록(docs/scale-log.txt), 약 6분
-./scripts/cluster-down.sh    # 클러스터 삭제
+./scripts/cluster-up.sh      # 클러스터 만들기 + 이미지 빌드 + DB + 서버 2개 + HPA
+./scripts/load.sh            # 2분 동안 부하 주면서 10초마다 CPU·서버 수 기록 (약 6분)
+./scripts/cluster-down.sh    # 클러스터 지우기
 ```
 
 접속: <http://localhost:8092/broadcasts>
 
-### 환경변수 예시 (클러스터)
+DB 비밀번호는 `cluster-up.sh`가 랜덤으로 만들어서 쿠버네티스 Secret에만 저장합니다. 토스 키는 실행 전에 `export` 해 두면 같이 들어갑니다(선택).
 
-| 변수 | 예시 | 설명 |
-| --- | --- | --- |
-| `SPRING_PROFILES_ACTIVE` | `cluster` | 매니페스트에 고정 |
-| `DB_URL` | `jdbc:postgresql://postgres:5432/chzzk` | 매니페스트에 고정 |
-| `DB_USERNAME` | `chzzk` | 매니페스트에 고정 |
-| `DB_PASSWORD` | (자동 생성) | `cluster-up.sh`가 `openssl rand`로 만들어 Secret `chzzk-secrets`에만 저장 |
-| `TOSS_CLIENT_KEY` / `TOSS_SECRET_KEY` | `test_gck_xxxx` / `test_gsk_xxxx` | 선택. `cluster-up.sh` 실행 전에 `export` 하면 Secret에 들어감 |
+### 직접 해 본 결과 (2026-11-18)
 
-### 직접 확인 절차
-
-1. `./scripts/cluster-up.sh` 후 `kubectl --context kind-chzzk get pods,hpa` → chzzk 파드 2개, HPA `2/5`
-2. <http://localhost:8092> 에서 회원가입·로그인·방송 등록·댓글 작성
-3. 같은 쿠키로 여러 번 요청해 응답 헤더 `X-Chzzk-Instance`가 바뀌어도 로그인·댓글이 그대로인지 확인
-   ```bash
-   curl -s -c jar -d "username=me&password=pw" localhost:8092/login -o /dev/null
-   for i in 1 2 3 4 5; do curl -s -b jar -D - localhost:8092/broadcasts -o /dev/null | grep -i x-chzzk-instance; done
-   ```
-4. `./scripts/load.sh` 실행 → 부하 중 파드 수가 늘고, 부하가 끝나고 약 1분 뒤 2개로 줄어드는지 확인. 그동안 3번을 반복해 로그인 유지 확인
-5. `./scripts/cluster-down.sh`
-
-### 실제 확인 기록 (2026-11-18)
-
-**인스턴스 수 변화** (`scripts/load.sh` 출력, 전체는 [docs/scale-log.txt](docs/scale-log.txt))
+**서버 수 변화** (전체: [docs/scale-log.txt](docs/scale-log.txt))
 
 ```
 17:27:58 cpu=17%  replicas=2   ← 부하 시작
-17:28:29 cpu=329% replicas=2   ← CPU가 기준(50%) 초과
-17:28:49 cpu=399% replicas=5   ← 자동 스케일 아웃 2 → 5 (최대)
-17:30:12 cpu=217% replicas=5
-17:30:32 cpu=1%   replicas=5   ← 부하 종료(2분)
-17:31:33 cpu=1%   replicas=2   ← 자동 스케일 인 5 → 2
+17:28:29 cpu=329% replicas=2   ← CPU가 기준(50%) 넘음
+17:28:49 cpu=399% replicas=5   ← 2개 → 5개로 늘어남
+17:30:32 cpu=1%   replicas=5   ← 부하 끝
+17:31:33 cpu=1%   replicas=2   ← 5개 → 2개로 줄어듦
 ```
 
-**부하 결과** ([docs/k6-summary.txt](docs/k6-summary.txt)): 2분간 요청 561,085건(초당 약 4,674건), 실패 0%, 평균 응답 10.65ms
-
-**스케일 중 상태 유지** ([docs/session-check-log.txt](docs/session-check-log.txt)): 로그인한 쿠키로 15초마다 22번 방송 상세를 요청 → 응답한 파드가 5개로 바뀌는 동안(스케일 아웃으로 새로 생긴 파드, 스케일 인 뒤 남은 파드 포함) **22번 모두 로그인 상태 유지, 댓글 표시**
-
-```
-17:28:54 chzzk-5558ffb668-8nj7q login=1 comment=1   ← 처음부터 있던 파드
-17:29:41 chzzk-5558ffb668-sphjr login=1 comment=1   ← 스케일 아웃으로 생긴 파드
-17:30:11 chzzk-5558ffb668-qvkc8 login=1 comment=1   ← 스케일 아웃으로 생긴 파드
-17:31:42 chzzk-5558ffb668-nqzjd login=1 comment=1   ← 스케일 인 뒤 남은 파드
-```
+- **부하 결과** ([docs/k6-summary.txt](docs/k6-summary.txt)): 2분 동안 요청 561,085건(초당 약 4,674건), 실패 0%, 평균 응답 10.65ms
+- **로그인 유지** ([docs/session-check-log.txt](docs/session-check-log.txt)): 로그인한 상태로 15초마다 22번 요청했습니다. 응답한 서버가 5개로 바뀌는 동안에도 **22번 모두 로그인 상태와 댓글이 그대로** 나왔습니다.

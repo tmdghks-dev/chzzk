@@ -13,6 +13,40 @@
 **사용 기술**: Spring Boot 4.1, Java 25, Thymeleaf, Spring Data JPA, H2(파일 DB), WebSocket, WebRTC, 토스페이먼츠 결제위젯
 ⑤단계만 Docker, kind(로컬 쿠버네티스), PostgreSQL, k6를 추가로 썼습니다.
 
+## 테스트할 때 쓰는 링크
+
+**방송 등록용 테스트 영상** (방송 등록 화면의 영상 URL 칸에 그대로 붙여 넣으면 됩니다)
+
+| 영상 | URL |
+| --- | --- |
+| 꽃 (5초) | `https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4` |
+| 금요일 (짧은 영상) | `https://interactive-examples.mdn.mozilla.net/media/cc0-videos/friday.mp4` |
+| 빅 벅 버니 (10초) | `https://www.w3schools.com/html/mov_bbb.mp4` |
+| 샘플 (5초) | `https://download.samplelib.com/mp4/sample-5s.mp4` |
+
+**내 사이트** (서버를 켠 상태에서)
+
+| 화면 | 주소 |
+| --- | --- |
+| 방송 목록 (첫 화면) | <http://localhost:8091/broadcasts> |
+| 회원가입 / 로그인 | <http://localhost:8091/signup> / <http://localhost:8091/login> |
+| 녹화방송 등록 | <http://localhost:8091/broadcasts/new> |
+| 라이브 시작 | <http://localhost:8091/lives/new> (휴대폰은 터널 주소 + `/lives/new`) |
+| ⑤ 클러스터 모드 | <http://localhost:8092/broadcasts> |
+
+**토스페이먼츠**
+
+- [API 키 확인 (개발자센터)](https://developers.tosspayments.com/my/api-keys) — 결제위젯 연동 키 `test_gck_` / `test_gsk_`를 여기서 복사합니다
+- [테스트 결제 내역](https://developers.tosspayments.com/my/payment-logs) — 테스트로 결제한 기록이 남는지 확인
+- [테스트 환경 안내](https://docs.tosspayments.com/guides/v2/get-started/environment) — 테스트 키로는 실제 돈이 나가지 않습니다
+- [결제위젯 연동 가이드](https://docs.tosspayments.com/guides/v2/payment-widget/integration)
+
+**도구**
+
+- [Cloudflare 빠른 터널 (trycloudflare)](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/) — 휴대폰 라이브용 https 주소
+- [k6 문서](https://grafana.com/docs/k6/latest/) — 부하 테스트
+- [kind](https://kind.sigs.k8s.io/) — 로컬 쿠버네티스
+
 ---
 
 ## 실행하는 법

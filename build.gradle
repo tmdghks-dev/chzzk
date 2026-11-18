@@ -29,6 +29,10 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     implementation 'org.springframework.security:spring-security-crypto'
+    // 5단계: 세션을 DB에 저장(인스턴스 공용), 클러스터용 PostgreSQL, 상태 확인용 actuator
+    implementation 'org.springframework.boot:spring-boot-starter-session-jdbc'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    runtimeOnly 'org.postgresql:postgresql'
 }
 
 tasks.named('test') {

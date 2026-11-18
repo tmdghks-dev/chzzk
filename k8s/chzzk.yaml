@@ -1,0 +1,65 @@
+# chzzk 서버 여러 인스턴스 + 요청 분산(Service) + 자동 스케일(HPA)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chzzk
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: chzzk }
+  template:
+    metadata:
+      labels: { app: chzzk }
+    spec:
+      containers:
+        - name: chzzk
+          image: chzzk:local
+          imagePullPolicy: Never
+          ports: [{ containerPort: 8080 }]
+          env:
+            - { name: SPRING_PROFILES_ACTIVE, value: cluster }
+            - { name: DB_URL, value: "jdbc:postgresql://postgres:5432/chzzk" }
+            - { name: DB_USERNAME, value: chzzk }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: chzzk-secrets, key: DB_PASSWORD } }
+            - name: TOSS_CLIENT_KEY
+              valueFrom: { secretKeyRef: { name: chzzk-secrets, key: TOSS_CLIENT_KEY, optional: true } }
+            - name: TOSS_SECRET_KEY
+              valueFrom: { secretKeyRef: { name: chzzk-secrets, key: TOSS_SECRET_KEY, optional: true } }
+          resources:
+            requests: { cpu: 250m, memory: 384Mi }   # HPA는 이 요청량 대비 사용률(%)을 본다
+            limits: { cpu: "1", memory: 768Mi }
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: 8080 }
+            periodSeconds: 3
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: 8080 }
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chzzk
+spec:
+  type: NodePort
+  selector: { app: chzzk }   # 준비된 chzzk 파드들에 요청을 나눠 보낸다
+  ports:
+    - { port: 80, targetPort: 8080, nodePort: 30080 }
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: chzzk
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: chzzk }
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 50 }   # 평균 CPU가 요청량의 50%를 넘으면 늘린다
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 60   # 부하가 멈추고 1분간 낮으면 줄인다 (기본 5분 → 확인하기 쉽게 단축)

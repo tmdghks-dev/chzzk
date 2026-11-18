@@ -1,0 +1,19 @@
+# 클러스터 안에서 k6로 부하를 건다 (스크립트는 load/k6-load.js → ConfigMap k6-script)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: k6-load
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: k6
+          image: grafana/k6:0.57.0
+          args: ["run", "/scripts/k6-load.js"]
+          volumeMounts:
+            - { name: script, mountPath: /scripts }
+      volumes:
+        - name: script
+          configMap: { name: k6-script }

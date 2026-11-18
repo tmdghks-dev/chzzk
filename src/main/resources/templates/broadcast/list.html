@@ -1,8 +1,11 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org">
-<head><meta charset="UTF-8"><title>치지직</title></head>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>치지직</title>
+</head>
 <body>
-<h1>방송 목록</h1>
 <div th:if="${session.memberId}">
     <span th:text="${session.username} + '님'"></span>
     <form method="post" action="/logout" style="display:inline"><button>로그아웃</button></form>
@@ -10,6 +13,22 @@
 <div th:unless="${session.memberId}">
     <a href="/login">로그인</a> | <a href="/signup">회원가입</a>
 </div>
+
+<h1>라이브</h1>
+<a href="/lives/new">🔴 라이브 시작</a>
+<ul>
+    <li th:each="l : ${lives}">
+        <span th:if="${l.onAir}">
+            🔴 <a th:href="@{/lives/{id}(id=${l.id})}" th:text="${l.title}">제목</a> (방송 중)
+        </span>
+        <span th:unless="${l.onAir}" style="color:gray">
+            <span th:text="${l.title}">제목</span> (종료)
+        </span>
+    </li>
+    <li th:if="${#lists.isEmpty(lives)}">아직 라이브가 없어요</li>
+</ul>
+
+<h1>방송 목록</h1>
 <a href="/broadcasts/new">+ 방송 등록</a>
 <ul>
     <li th:each="b : ${broadcasts}">

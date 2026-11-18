@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title th:text="${live.title} + ' - 시청'">시청</title>
+</head>
+<body>
+<h1 th:text="${live.title}">제목</h1>
+
+<div th:if="${live.onAir}">
+    <p>상태: <span id="status">방송자 연결 기다리는 중</span></p>
+    <video id="screen" autoplay playsinline muted controls style="width:100%; height:85vh; object-fit:contain; background:#000;"></video>
+    <p>소리는 영상의 스피커 아이콘을 눌러 켜세요.</p>
+</div>
+
+<p th:unless="${live.onAir}">종료된 방송이에요.</p>
+
+<a th:href="@{/broadcasts}">목록으로</a>
+
+<script th:if="${live.onAir}" th:inline="javascript">
+    const liveId = /*[[${live.id}]]*/ 0;
+    const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
+    const statusEl = document.getElementById('status');
+    const screen = document.getElementById('screen');
+    let pc;
+
+    const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+    const ws = new WebSocket(protocol + '://' + location.host + '/ws/live?liveId=' + liveId + '&role=viewer');
+
+    function send(msg) {
+        ws.send(JSON.stringify(msg));
+    }
+
+    ws.onmessage = async (event) => {
+        const msg = JSON.parse(event.data);
+
+        if (msg.type === 'offer') {
+            pc?.close();
+            pc = new RTCPeerConnection(rtcConfig);
+            pc.ontrack = (e) => {
+                screen.srcObject = e.streams[0];
+                statusEl.textContent = '방송 중';
+            };
+            pc.onicecandidate = (e) => {
+                if (e.candidate) send({ type: 'ice', candidate: e.candidate });
+            };
+
+            await pc.setRemoteDescription(msg.sdp);
+            await pc.setLocalDescription(await pc.createAnswer());
+            send({ type: 'answer', sdp: pc.localDescription });
+
+        } else if (msg.type === 'ice') {
+            await pc?.addIceCandidate(msg.candidate);
+
+        } else if (msg.type === 'ended') {
+            pc?.close();
+            screen.srcObject = null;
+            statusEl.textContent = '방송이 종료됐어요';
+        }
+    };
+
+    ws.onclose = () => {
+        if (statusEl.textContent !== '방송이 종료됐어요') {
+            statusEl.textContent = '서버 연결 끊김 (새로고침 해 보세요)';
+        }
+    };
+</script>
+</body>
+</html>

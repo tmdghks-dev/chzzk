@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title th:text="${live.title} + ' - 송출'">송출</title>
+</head>
+<body>
+<h1 th:text="${live.title}">제목</h1>
+<p>상태: <span id="status">대기 중</span> / 시청자 <span id="count">0</span>명</p>
+
+<video id="preview" autoplay muted playsinline style="width:100%; height:85vh; object-fit:cover; background:#000;"></video>
+
+<p>
+    <button id="startBtn" type="button">카메라 켜고 송출 시작</button>
+    <button id="switchBtn" type="button" disabled>카메라 전환</button>
+</p>
+
+<form th:action="@{/lives/{id}/end(id=${live.id})}" method="post">
+    <input type="hidden" name="key" th:value="${live.streamKey}">
+    <button type="submit">방송 종료</button>
+</form>
+
+<p>시청 주소: <a th:href="@{/lives/{id}(id=${live.id})}" th:text="@{/lives/{id}(id=${live.id})}"></a></p>
+
+<script th:inline="javascript">
+    const liveId = /*[[${live.id}]]*/ 0;
+    const streamKey = /*[[${live.streamKey}]]*/ '';
+    const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
+    const peers = {};          // 시청자 id → 그 시청자와의 연결
+    let stream;
+    let ws;
+    let facing = 'environment'; // environment = 후면, user = 전면
+
+    const statusEl = document.getElementById('status');
+    const countEl = document.getElementById('count');
+    const preview = document.getElementById('preview');
+    const switchBtn = document.getElementById('switchBtn');
+
+    function send(msg) {
+        ws.send(JSON.stringify(msg));
+    }
+
+    function updateCount() {
+        countEl.textContent = Object.keys(peers).length;
+    }
+
+    document.getElementById('startBtn').onclick = async () => {
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing }, audio: true });
+        } catch (e) {
+            statusEl.textContent = '카메라/마이크 권한이 필요해요 (' + e.name + ')';
+            return;
+        }
+        preview.srcObject = stream;
+        document.getElementById('startBtn').disabled = true;
+        switchBtn.disabled = false;
+
+        const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+        ws = new WebSocket(protocol + '://' + location.host + '/ws/live?liveId=' + liveId
+            + '&role=broadcaster&key=' + encodeURIComponent(streamKey));
+
+        ws.onopen = () => statusEl.textContent = '방송 중';
+        ws.onclose = () => statusEl.textContent = '서버 연결 끊김';
+
+        ws.onmessage = async (event) => {
+            const msg = JSON.parse(event.data);
+
+            if (msg.type === 'viewer-joined') {
+                const pc = new RTCPeerConnection(rtcConfig);
+                peers[msg.viewerId] = pc;
+                updateCount();
+
+                stream.getTracks().forEach(track => pc.addTrack(track, stream));
+                pc.onicecandidate = (e) => {
+                    if (e.candidate) send({ type: 'ice', to: msg.viewerId, candidate: e.candidate });
+                };
+
+                await pc.setLocalDescription(await pc.createOffer());
+                send({ type: 'offer', to: msg.viewerId, sdp: pc.localDescription });
+
+            } else if (msg.type === 'answer') {
+                await peers[msg.from]?.setRemoteDescription(msg.sdp);
+
+            } else if (msg.type === 'ice') {
+                await peers[msg.from]?.addIceCandidate(msg.candidate);
+
+            } else if (msg.type === 'viewer-left') {
+                peers[msg.viewerId]?.close();
+                delete peers[msg.viewerId];
+                updateCount();
+            }
+        };
+    };
+
+    switchBtn.onclick = async () => {
+        facing = facing === 'environment' ? 'user' : 'environment';
+
+        // 아이폰은 카메라 두 개를 동시에 못 켜서, 기존 카메라를 먼저 끈다
+        const oldTrack = stream.getVideoTracks()[0];
+        oldTrack.stop();
+        stream.removeTrack(oldTrack);
+
+        const newStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing } });
+        const newTrack = newStream.getVideoTracks()[0];
+        stream.addTrack(newTrack);
+        preview.srcObject = stream;
+
+        // 이미 보고 있는 시청자들에게도 새 카메라 영상으로 바꿔 보낸다
+        for (const pc of Object.values(peers)) {
+            const sender = pc.getSenders().find(s => s.track === null || s.track.kind === 'video');
+            if (sender) await sender.replaceTrack(newTrack);
+        }
+    };
+</script>
+</body>
+</html>

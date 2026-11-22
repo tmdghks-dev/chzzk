@@ -1,7 +1,7 @@
 {
   "name": "chzzk-desktop",
   "productName": "Chzzk",
-  "version": "1.0.1",
+  "version": "1.2.0",
   "description": "치지직 데스크톱 앱 (chzzk.tmdghks.dev)",
   "main": "main.js",
   "author": "tmdghks",
@@ -30,7 +30,9 @@
         "NSCameraUsageDescription": "라이브 방송을 송출할 때 카메라를 사용해요.",
         "NSMicrophoneUsageDescription": "라이브 방송을 송출할 때 마이크를 사용해요.",
         "CFBundleDisplayName": "치지직"
-      }
+      },
+      "identity": "-",
+      "hardenedRuntime": false
     },
     "win": {
       "target": [

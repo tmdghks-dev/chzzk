@@ -440,6 +440,7 @@ kubectl create secret generic chzzk-secrets \
 | --- | --- | --- |
 | Mac 앱이 켜자마자 꺼짐 | Electron 앱 이름(`productName`)을 한글 `치지직`으로 지음 | 내부 이름은 `Chzzk`, 화면 표시 이름만 한글(`CFBundleDisplayName`) |
 | iPhone 앱에서 로그인 누르면 Safari로 넘어감 | 앱 시작 주소가 `/broadcasts`라, 그 주소로 시작하지 않는 페이지는 밖으로 보냄 | 시작 주소를 사이트 루트로 바꾸고 `/` → `/broadcasts` 리다이렉트 추가 |
+| Mac 앱에서 방송할 때 마이크 권한을 5~6번 물어봄 | 앱 묶음 전체가 서명되지 않아(실행 파일만 링커 서명) macOS가 허용을 기억하지 못함 | electron-builder `mac.identity: "-"`로 앱 전체 애드혹 서명. 공증까지 하려면 Developer ID 인증서 필요 |
 | iPhone 상단 바가 시계와 겹침 | 웹뷰가 화면 끝까지 차지 | Capacitor `ios.contentInset: always` |
 | Android 영상 자리에 회색 재생 아이콘 | 안드로이드 웹뷰 기본 포스터 | `<video poster>`에 투명 이미지 |
 | OCI 서버 생성 실패 | 싱가포르 A1 자리 부족 | CLI 자동 재시도 + Pay As You Go 전환 |

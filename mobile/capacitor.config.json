@@ -3,7 +3,10 @@
   "appName": "치지직",
   "webDir": "www",
   "server": {
-    "url": "https://chzzk.tmdghks.dev/broadcasts",
+    "url": "https://chzzk.tmdghks.dev",
+    "allowNavigation": [
+      "chzzk.tmdghks.dev"
+    ],
     "errorPath": "index.html"
   },
   "backgroundColor": "#0b0e1a",

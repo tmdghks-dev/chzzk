@@ -291,12 +291,25 @@ DB 비밀번호는 `cluster-up.sh`가 랜덤으로 만들어서 쿠버네티스 
 
 | 항목 | 내용 |
 | --- | --- |
-| 도메인 | `tmdghks.dev` (2026-11-20 구매, 1년) |
+| 도메인 | `tmdghks.dev` |
+| 등록 여부 | **등록 완료** (2026-11-20, 만료 2027-11-20, Cloudflare 대시보드에서 Active) |
 | 등록 기관 | Cloudflare Registrar |
-| 비용 | **약 $12.20 / 년** (Cloudflare는 등록 원가에 팔아서 .dev 중 가장 쌈. 다른 곳은 $12~21) |
+| 최초 등록 비용 | **$12.20** (1년) |
+| 갱신 비용 | **$12.20 / 년** (Cloudflare는 등록·갱신 모두 원가 판매, 자동 갱신 켬. 2026-10 기준 다른 등록 기관은 갱신 $12~21) |
 | 서브도메인 | `chzzk.tmdghks.dev` → 터널(CNAME), `tmdghks.dev` → Cloudflare Pages(포트폴리오·다운로드 페이지) |
 
-**DNS·HTTPS**
+**DNS·HTTPS 구성 방법**
+
+1. Cloudflare Registrar에서 도메인을 사면 네임서버가 자동으로 Cloudflare가 됩니다.
+2. OCI 서버에서 Cloudflare 터널을 만들고, 서브도메인을 터널에 연결합니다.
+   ```bash
+   cloudflared tunnel login                         # 브라우저에서 도메인 선택 (인증서 발급)
+   cloudflared tunnel create tmdghks                # 터널 + 자격 증명 JSON 생성
+   cloudflared tunnel route dns tmdghks chzzk.tmdghks.dev
+   ```
+   마지막 명령이 DNS에 `chzzk` **CNAME → `<터널ID>.cfargotunnel.com` (프록시 켜짐)** 레코드를 만듭니다. 이 레코드가 OCI 서버의 터널로 이어지므로, 서버 IP를 가리키는 A 레코드나 80/443 포트 개방이 필요 없습니다.
+3. 서버에 [deploy/cloudflared-config.yml](deploy/cloudflared-config.yml)을 `/etc/cloudflared/config.yml`로 두고 `sudo cloudflared service install`로 서비스를 등록합니다.
+4. 다운로드 페이지는 Cloudflare Pages에 GitHub 저장소를 연결하고 커스텀 도메인 `tmdghks.dev`를 붙였습니다. push하면 자동 배포됩니다. 소스는 [download-page/index.html](download-page/index.html)에 같이 넣어 두었습니다.
 
 - 네임서버가 Cloudflare라서 DNS 레코드를 대시보드나 `cloudflared tunnel route dns`로 바로 추가합니다.
 - HTTPS 인증서는 Cloudflare가 자동으로 발급·갱신합니다. 서버에는 인증서를 둘 필요가 없습니다.
@@ -328,7 +341,34 @@ DB 비밀번호는 `cluster-up.sh`가 랜덤으로 만들어서 쿠버네티스 
 
 세 개 모두 서버가 재부팅되면 자동으로 다시 켜집니다.
 
-**배포**: 내 Mac에서 `./scripts/oci-deploy.sh` 한 줄 (⑦ 참고)
+**처음부터 다시 만드는 절차**
+
+| 순서 | 할 일 | 파일 |
+| --- | --- | --- |
+| 1 | OCI 콘솔에서 VCN·인터넷 게이트웨이·공개 서브넷을 만들고, 보안 목록에 22/tcp, 3478/tcp·udp, 49160-49200/udp를 연다 | — |
+| 2 | VM 생성. 자리가 없으면 자동 재시도 (`OCPUS=2 MEM=12`) | [scripts/oci-create-vm.sh](scripts/oci-create-vm.sh) |
+| 3 | 서버에 Docker·K3s·cloudflared·coturn 설치, 방화벽(iptables) 열기 | [scripts/oci-server-setup.sh](scripts/oci-server-setup.sh) |
+| 4 | coturn 설정, 터널 설정 | [deploy/turnserver.conf](deploy/turnserver.conf), [deploy/cloudflared-config.yml](deploy/cloudflared-config.yml) |
+| 5 | Secret 만들기 (값은 저장소에 없음) | 아래 명령 |
+| 6 | 배포: 내 Mac에서 한 줄 | [scripts/oci-deploy.sh](scripts/oci-deploy.sh) |
+
+```bash
+# 5. 서버에서 한 번 (값은 직접 넣는다)
+kubectl create secret generic chzzk-secrets \
+  --from-literal=DB_PASSWORD=$(openssl rand -hex 16) \
+  --from-literal=TOSS_CLIENT_KEY=<토스 테스트 클라이언트 키> --from-literal=TOSS_SECRET_KEY=<토스 테스트 시크릿 키> \
+  --from-literal=TURN_SECRET=<turnserver.conf의 static-auth-secret과 같은 값>
+```
+
+**배포 환경 설정** (모두 환경 변수, 비밀 값은 Secret에서)
+
+| 변수 | 내용 |
+| --- | --- |
+| `SPRING_PROFILES_ACTIVE=cluster` | PostgreSQL 사용 ([application-cluster.properties](src/main/resources/application-cluster.properties)) |
+| `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` | DB 접속 |
+| `TOSS_CLIENT_KEY`, `TOSS_SECRET_KEY` | 토스페이먼츠 테스트 키 |
+| `TURN_URL`, `TURN_SECRET` | TURN 주소와 임시 계정 발급용 비밀 값 |
+| 상태 확인 | `/actuator/health`, `/actuator/health/liveness`, `/actuator/health/readiness` |
 
 ### 셀룰러에서도 라이브 되게 (TURN)
 
@@ -364,6 +404,35 @@ DB 비밀번호는 `cluster-up.sh`가 랜덤으로 만들어서 쿠버네티스 
   - 다운로드 페이지는 `releases/latest/download/...` 고정 주소라 새 버전이 나오면 자동으로 최신을 받습니다.
 - **카메라·마이크 권한**: Android 매니페스트, iOS `Info.plist`, macOS `extendInfo`에 넣었습니다. 앱에서도 라이브 송출이 됩니다.
 - Android 서명 키는 저장소에 넣지 않고 GitHub Secrets(`ANDROID_KEYSTORE_B64`, `ANDROID_KEYSTORE_PASSWORD`)로 넘깁니다.
+
+### 데스크톱 클라이언트가 하는 일
+
+- [desktop/main.js](desktop/main.js): 앱을 켜면 배포한 백엔드의 방송 목록 `https://chzzk.tmdghks.dev/broadcasts`를 창에 엽니다.
+  - 라이브 카드를 누르면 WebRTC로 실시간 시청, 다시보기 카드를 누르면 영상이 재생됩니다.
+  - 접속 주소는 환경 변수 `CHZZK_URL`로 바꿀 수 있습니다. 예: 로컬 테스트용 `CHZZK_URL=http://localhost:8091/broadcasts npm start`
+- 우리 사이트 밖 링크는 기본 브라우저로 열고, 카메라·마이크 권한은 우리 사이트에만 줍니다.
+- 빌드 설정: [desktop/package.json](desktop/package.json)의 `build`(electron-builder). Windows는 `nsis` x64, macOS는 `dmg` universal(arm64+x64).
+  ```bash
+  cd desktop && npm ci && npm run dist        # 지금 OS용 설치 파일이 desktop/dist/에 생김
+  ```
+
+### 다운로드와 설치·실행 확인 절차
+
+1. 다른 네트워크(휴대폰 셀룰러 등)에서 <https://tmdghks.dev/download/> 접속 → HTTPS 자물쇠 확인
+2. 내 OS 카드에서 파일 받기
+   - Windows: `.exe` 실행 → 자동 설치 후 실행
+   - macOS: `.dmg` 열기 → Applications로 끌어 놓기 → 실행. 첫 실행 경고는 시스템 설정 → 개인정보 보호 및 보안 → "그래도 열기"
+   - Android: `.apk` 열기 → 출처 허용 → 설치
+3. 앱 첫 화면에 방송 목록이 나오는지, 다시보기 카드를 눌러 재생되는지, 라이브가 보이는지 확인
+
+### 테스트한 OS·아키텍처와 결과
+
+| OS | 아키텍처 | 받은 파일 | 결과 |
+| --- | --- | --- | --- |
+| macOS 27 (Apple Silicon) | arm64 | GitHub Release의 `chzzk-mac-universal.dmg` | ✅ 설치·실행, 방송 목록 화면 표시 (1.0.0은 한글 앱 이름 때문에 바로 꺼져서 1.0.1에서 고침) |
+| Windows 11 | x64 | `chzzk-win-x64.exe` | ⏳ 확인 예정 (빌드는 GitHub Actions `windows-latest`에서 성공) |
+| Android 17 (에뮬레이터) | arm64 | `chzzk-android.apk` | ✅ 설치·실행, 라이브 송출(카메라 권한 허용 후 "방송 중") |
+| iOS (실기기) | arm64 | TestFlight | ✅ 로그인, 와이파이·셀룰러 라이브 송출과 시청 |
 
 ### 겪은 문제
 
@@ -407,6 +476,52 @@ Cloudflare ─(터널)─┤                │                                 
 | 데이터 | PostgreSQL + 로그인 세션도 DB(Spring Session JDBC) → 파드가 바뀌어도 로그인 유지 | `k8s/postgres.yaml` |
 | 외부 연결 | cloudflared가 경로로 나눔: `^/ws/` → 30081, 나머지 → 30080 | `/etc/cloudflared/config.yml` |
 
+### K3s 설치와 이미지 준비
+
+```bash
+# 서버에서 (scripts/oci-server-setup.sh에 포함)
+curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--disable traefik --write-kubeconfig-mode 644" sh -
+kubectl get nodes          # tmdghks-server  Ready  control-plane  (노드 1대)
+```
+
+- **VM이 ARM(aarch64)** 이라 이미지도 `linux/arm64`여야 합니다.
+  - 백엔드 이미지: **서버에서 직접** `docker build`해서 arm64로 만들고 `k3s ctr images import`로 K3s에 넣습니다. 레지스트리가 필요 없습니다 (`imagePullPolicy: Never`).
+  - 의존 이미지: `eclipse-temurin:25`, `postgres:17`, `grafana/k6:0.57.0`은 모두 arm64를 지원하는 멀티 아키텍처 이미지라 그대로 받습니다.
+- Traefik 대신 **기존 HTTPS 경로(Cloudflare 터널)** 를 씁니다. 터널이 NodePort Service(30080, 30081)로 보내므로 Ingress가 필요 없습니다.
+
+### 최대 파드 수 정한 근거
+
+VM: **2 OCPU(할당 가능 CPU 2000m), 메모리 약 11.6GiB**
+
+| 구성 요소 | CPU 요청 | 메모리 요청 |
+| --- | --- | --- |
+| K3s 시스템 (coredns, metrics-server) | 200m | 140Mi |
+| PostgreSQL | 요청 없음 (평소 15m 정도 사용) | — |
+| chzzk-live 1개 | 250m | 384Mi |
+| **chzzk 1개당** | **250m** | **384Mi** |
+| K8s 밖: k3s 본체·cloudflared·coturn | 요청 없음, 실제 수백 m 사용 | 약 1GiB |
+
+- chzzk 5개면 요청 합계 = 200 + 250 + 250×5 = **1700m (85%)**. 남은 300m는 K3s 본체·DB·터널·TURN이 쓸 여유입니다.
+- 6개면 1950m(97.5%)가 되어 여유가 없고, 7개는 2000m를 넘어 아예 배치되지 않습니다(Pending). 그래서 **최대 5개**.
+- 메모리는 5개여도 요청 합계 약 2.4GiB라 여유가 많습니다. **CPU가 한계**입니다.
+- 최소 2개: 하나가 교체·재시작되는 동안에도 다른 하나가 응답하게.
+
+### 단일 VM 장애의 영향
+
+- 노드가 1대라 **VM이 죽으면 서비스 전체가 멈춥니다.** 파드를 여러 개 띄워도 같은 VM 안이라, 막아 주는 건 "파드 하나의 장애"까지입니다.
+- VM이 재부팅되면 K3s·cloudflared·coturn이 systemd로 자동으로 켜지고, 파드와 DB도 다시 뜹니다. 몇 분간 접속이 안 됩니다.
+- DB는 VM의 로컬 디스크(local-path PVC)에 있습니다. **VM이나 부트 볼륨이 사라지면 데이터도 사라집니다.** 백업은 아직 없습니다. 필요하면 `pg_dump`를 Object Storage로 정기 복사하면 됩니다.
+- 라이브 시그널링 파드는 1개라, 이 파드가 재시작되면 진행 중인 라이브 연결이 끊깁니다. 새로고침하면 다시 붙습니다.
+
+### 파드가 바뀌어도 유지되는 데이터
+
+| 데이터 | 어디에 | 근거 |
+| --- | --- | --- |
+| 로그인 세션 | PostgreSQL `SPRING_SESSION` 테이블 | Spring Session JDBC ([application.properties](src/main/resources/application.properties)) |
+| 회원·방송·라이브 상태·댓글·후원 | PostgreSQL | JPA 엔티티 |
+| 영상 | 영상 파일은 서버에 올리지 않고 **URL만 DB에 저장** | `Broadcast.videoPath` |
+| DB 파일 | PersistentVolumeClaim `postgres-data` (K3s local-path) | [k8s/postgres.yaml](k8s/postgres.yaml) |
+
 ### 라이브는 왜 따로 뺐나
 
 - 라이브 시그널링(방송자·시청자 웹소켓 연결)은 **파드 메모리**에 들고 있습니다.
@@ -423,9 +538,33 @@ Cloudflare ─(터널)─┤                │                                 
 
 소스를 서버로 복사 → ARM 이미지 빌드 → K3s에 넣기 → `kubectl apply` → 파드 순차 교체(rollout) → health 확인까지 한 번에 합니다. 파드를 하나씩 바꿔서 배포 중에도 사이트가 끊기지 않습니다.
 
+### 확인 절차
+
+```bash
+kubectl get nodes                 # 작업 전후 노드 1대인지
+kubectl top pods                  # metrics-server가 CPU·메모리를 모으는지
+kubectl get hpa chzzk -w          # 부하 중 REPLICAS 2 → 5, 부하 후 5 → 2
+kubectl get pods -l app=chzzk -w  # 파드가 생기고 지워지는 것
+CTX=default bash scripts/load.sh docs/oci-scale-log.txt   # 부하 + 10초마다 CPU·파드 수 기록
+```
+
+- 부하 도구: k6를 **클러스터 안의 Job**으로 실행합니다 ([k8s/k6-job.yaml](k8s/k6-job.yaml), [load/k6-load.js](load/k6-load.js)). 대상은 Service `http://chzzk/broadcasts` (방송 목록, DB 조회가 있는 경로)입니다.
+- 축소 안정화 시간은 기본 5분인데, 확인하기 쉽게 HPA `behavior.scaleDown.stabilizationWindowSeconds: 60`으로 1분으로 줄였습니다.
+
 ### 직접 해 본 결과 (2026-11-22)
 
-서버 안에서 k6로 가상 사용자 50명이 2분 동안 `/broadcasts`를 요청했습니다.
+**작업 전후 노드**: `kubectl get nodes` → `tmdghks-server   Ready   control-plane   v1.37.2+k3s1` (전·후 모두 1대)
+
+**지표 수집** (`kubectl top pods`, 부하 전)
+
+```
+chzzk-...-bgq6b         2m    248Mi
+chzzk-...-dvzff         5m    279Mi
+chzzk-live-...-xmnsn    2m    255Mi
+postgres-...-bzfx7     14m     78Mi
+```
+
+**부하 조건**: 서버 안에서 k6 가상 사용자 50명이 2분 동안 `/broadcasts`를 쉬지 않고 요청
 
 ```bash
 CTX=default bash scripts/load.sh docs/oci-scale-log.txt   # 서버에서 실행
@@ -444,4 +583,10 @@ CTX=default bash scripts/load.sh docs/oci-scale-log.txt   # 서버에서 실행
 
 - **부하 결과** ([docs/oci-k6-summary.txt](docs/oci-k6-summary.txt)): 요청 32,738건(초당 약 273건), **실패 0%**, 평균 응답 180ms
 - ⑤(로컬 Mac, 초당 4,674건)보다 처리량이 낮은 건, 무료 서버가 **ARM 2코어** 하나에서 k6·DB·서버 5개를 같이 돌렸기 때문입니다.
-- 전환 후에도 `chzzk.tmdghks.dev`의 health, 웹소켓 연결(101), TURN 임시 계정 발급(`/api/ice`)이 그대로 동작했습니다.
+- **부하 전·중·후 같은 HTTPS 주소 확인**: `https://chzzk.tmdghks.dev/broadcasts`가 계속 200으로 응답했고, 웹소켓 연결(101), TURN 임시 계정 발급(`/api/ice`)도 그대로 동작했습니다.
+- **저장된 데이터 유지**: `kubectl rollout restart`로 chzzk·chzzk-live 파드를 전부 새로 바꾸기 전후에 DB를 세어 봤습니다.
+  ```
+  교체 전: member=1 live=2 spring_session=2
+  교체 후: member=1 live=2 spring_session=2   ← 회원·방송·로그인 세션 그대로
+  ```
+  K3s로 옮긴 뒤 휴대폰 앱에서 회원가입·로그인·라이브 송출과 시청도 다시 확인했습니다.

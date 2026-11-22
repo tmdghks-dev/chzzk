@@ -1,0 +1,14 @@
+# 서버의 /etc/cloudflared/config.yml (cloudflared를 systemd 서비스로 실행)
+# 터널 만들기: cloudflared tunnel login → cloudflared tunnel create <이름> → cloudflared tunnel route dns <이름> chzzk.<도메인>
+# 자격 증명 JSON(<TUNNEL_ID>.json)은 비밀 값이라 저장소에 넣지 않는다.
+tunnel: <TUNNEL_ID>
+credentials-file: /etc/cloudflared/<TUNNEL_ID>.json
+ingress:
+  # 라이브 시그널링(웹소켓)은 K3s chzzk-live 파드 1개로 (k8s/oci.yaml 참고)
+  - hostname: chzzk.tmdghks.dev
+    path: ^/ws/
+    service: http://localhost:30081
+  # 나머지는 HPA로 늘어나는 chzzk 파드들로
+  - hostname: chzzk.tmdghks.dev
+    service: http://localhost:30080
+  - service: http_status:404

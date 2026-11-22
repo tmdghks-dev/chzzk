@@ -10,6 +10,7 @@
 | ④ 도네이션 | 토스페이먼츠 테스트 결제로 방송자에게 후원 |
 | ⑤ 오토스케일 | 부하가 오르면 서버가 2개 → 5개로 자동으로 늘어남 |
 | ⑥ 도메인·서버·앱 | 내 도메인 + OCI 무료 서버 24시간 운영, 셀룰러 라이브(TURN), PC·Mac·Android·iPhone 앱 |
+| ⑦ OCI에서 오토스케일 | OCI 서버에 K3s를 올리고 HPA로 2개 → 5개 자동 확장 (라이브 시그널링은 전용 파드) |
 
 **사용 기술**: Spring Boot 4.1, Java 25, Thymeleaf, Spring Data JPA, H2(파일 DB), WebSocket, WebRTC, 토스페이먼츠 결제위젯
 ⑤단계만 Docker, kind(로컬 쿠버네티스), PostgreSQL, k6를 추가로 썼습니다.
@@ -278,7 +279,7 @@ DB 비밀번호는 `cluster-up.sh`가 랜덤으로 만들어서 쿠버네티스 
 브라우저·앱 ──▶ │ DNS · HTTPS 인증서 · DDoS 보호       │ ──(Cloudflare Tunnel)──┐
                 └────────────────────────────────────┘                        ▼
                                                     ┌──── OCI 서버 (싱가포르, ARM) ────┐
-                                                    │ cloudflared  →  chzzk (Docker)   │
+                                                    │ cloudflared  →  chzzk (K3s)      │
 휴대폰 셀룰러 라이브 영상 ─────(UDP 3478)─────────▶ │ coturn (TURN 중계)               │
                                                     └──────────────────────────────────┘
 ```
@@ -321,22 +322,13 @@ DB 비밀번호는 `cluster-up.sh`가 랜덤으로 만들어서 쿠버네티스 
 
 | 이름 | 방식 | 역할 |
 | --- | --- | --- |
-| `chzzk` | Docker 컨테이너 (`--restart unless-stopped`) | 스프링 앱. H2 파일 DB는 볼륨 `~/chzzk-data`에 저장 |
+| `chzzk` | K3s (⑦ 참고) | 스프링 앱. 처음엔 Docker 컨테이너 하나 + H2로 띄웠다가 ⑦에서 K3s + PostgreSQL로 옮김 |
 | `cloudflared` | systemd 서비스 | `chzzk.tmdghks.dev` → `localhost:8091` 터널 |
 | `coturn` | systemd 서비스 | 셀룰러 라이브용 TURN 중계 |
 
 세 개 모두 서버가 재부팅되면 자동으로 다시 켜집니다.
 
-**배포** (내 Mac에서 한 줄. 소스 복사 → 서버에서 ARM 이미지 빌드 → 컨테이너 교체)
-
-```bash
-rsync -az --delete --exclude build --exclude .gradle --exclude data --exclude mobile --exclude desktop \
-  --exclude node_modules --exclude .git ./ ubuntu@<서버IP>:~/chzzk/
-ssh ubuntu@<서버IP> 'cd ~/chzzk && sudo docker build -q -t chzzk . && sudo docker rm -f chzzk && \
-  sudo docker run -d --name chzzk --restart unless-stopped -p 127.0.0.1:8091:8091 \
-  -v /home/ubuntu/chzzk-data:/app/data -e JAVA_TOOL_OPTIONS=-Xmx1g \
-  -e TURN_URL=turn:<서버IP>:3478 -e TURN_SECRET="$(cat ~/.turn-secret)" chzzk'
-```
+**배포**: 내 Mac에서 `./scripts/oci-deploy.sh` 한 줄 (⑦ 참고)
 
 ### 셀룰러에서도 라이브 되게 (TURN)
 
@@ -391,3 +383,65 @@ ssh ubuntu@<서버IP> 'cd ~/chzzk && sudo docker build -q -t chzzk . && sudo doc
 - Android 에뮬레이터: 앱 설치 → 라이브 시작 → 카메라 권한 허용 → "방송 중"
 - Mac: GitHub Actions가 만든 `.dmg`를 받아 실행 확인
 - iPhone: TestFlight로 설치 → 로그인·라이브 확인
+
+---
+
+## ⑦ OCI 서버에서 오토스케일 (K3s + HPA)
+
+⑤에서 로컬(kind)로 해 본 오토스케일을 **실제 서비스 중인 OCI 서버**로 옮겼습니다. 지금 `chzzk.tmdghks.dev`는 K3s 위에서 돌아갑니다.
+
+```
+                                  ┌──────────── OCI 서버 (K3s) ────────────┐
+                 /ws/ (라이브) ──▶ │ chzzk-live 파드 1개 (NodePort 30081)    │
+Cloudflare ─(터널)─┤                │                                          │──▶ PostgreSQL 파드
+                 그 외 페이지  ──▶ │ chzzk 파드 2~5개 ← HPA (NodePort 30080) │     (local-path PVC)
+                                  └──────────────────────────────────────────┘
+```
+
+| 필요한 것 | 어떻게 했나 | 파일 |
+| --- | --- | --- |
+| 쿠버네티스 | **K3s**: 서버 한 대용 경량 쿠버네티스. metrics-server·local-path 저장소가 기본 포함이라 HPA·PVC가 바로 됨. 안 쓰는 traefik은 끔 | — |
+| 이미지 | 서버에서 ARM 이미지를 빌드해 `k3s ctr images import`로 넣음 (레지스트리 없이) | `scripts/oci-deploy.sh` |
+| 비밀값 | DB 비밀번호(랜덤)·토스 키·TURN 비밀값을 Secret `chzzk-secrets`에만 저장 | — |
+| 자동 확장 | HPA: 최소 2, 최대 5, CPU 50%. 1분간 낮으면 줄임 | `k8s/oci.yaml` |
+| 데이터 | PostgreSQL + 로그인 세션도 DB(Spring Session JDBC) → 파드가 바뀌어도 로그인 유지 | `k8s/postgres.yaml` |
+| 외부 연결 | cloudflared가 경로로 나눔: `^/ws/` → 30081, 나머지 → 30080 | `/etc/cloudflared/config.yml` |
+
+### 라이브는 왜 따로 뺐나
+
+- 라이브 시그널링(방송자·시청자 웹소켓 연결)은 **파드 메모리**에 들고 있습니다.
+- 파드가 여러 개면 방송자는 A 파드, 시청자는 B 파드에 붙을 수 있습니다. 그러면 서로를 못 찾아서 화면이 안 나옵니다.
+- 그래서 웹소켓(`/ws/`)만 **전용 파드 1개(`chzzk-live`)**로 보내고, 목록·다시보기·로그인·후원 같은 나머지 페이지만 HPA로 늘립니다.
+- 같은 이미지·같은 DB를 쓰므로 기능 차이는 없습니다.
+- 한계: 동시 방송이 아주 많아지면 이 파드 하나가 병목이 됩니다. 그때는 Redis pub/sub처럼 파드끼리 시그널링 메시지를 주고받게 바꾸면 됩니다.
+
+### 배포
+
+```bash
+./scripts/oci-deploy.sh
+```
+
+소스를 서버로 복사 → ARM 이미지 빌드 → K3s에 넣기 → `kubectl apply` → 파드 순차 교체(rollout) → health 확인까지 한 번에 합니다. 파드를 하나씩 바꿔서 배포 중에도 사이트가 끊기지 않습니다.
+
+### 직접 해 본 결과 (2026-11-22)
+
+서버 안에서 k6로 가상 사용자 50명이 2분 동안 `/broadcasts`를 요청했습니다.
+
+```bash
+CTX=default bash scripts/load.sh docs/oci-scale-log.txt   # 서버에서 실행
+```
+
+**서버 수 변화** (전체: [docs/oci-scale-log.txt](docs/oci-scale-log.txt), 시간은 UTC)
+
+```
+10:24:59 cpu=1%   replicas=2   ← 부하 시작 전
+10:25:10 cpu=279% replicas=2   ← CPU가 기준(50%) 넘음
+10:25:31 cpu=290% replicas=5   ← 2개 → 5개로 늘어남
+10:26:04 cpu=191% replicas=5 ready=5   ← 5개 모두 준비 완료
+10:27:29 cpu=0%   replicas=5   ← 부하 끝
+10:28:11 cpu=0%   replicas=2   ← 5개 → 2개로 줄어듦
+```
+
+- **부하 결과** ([docs/oci-k6-summary.txt](docs/oci-k6-summary.txt)): 요청 32,738건(초당 약 273건), **실패 0%**, 평균 응답 180ms
+- ⑤(로컬 Mac, 초당 4,674건)보다 처리량이 낮은 건, 무료 서버가 **ARM 2코어** 하나에서 k6·DB·서버 5개를 같이 돌렸기 때문입니다.
+- 전환 후에도 `chzzk.tmdghks.dev`의 health, 웹소켓 연결(101), TURN 임시 계정 발급(`/api/ice`)이 그대로 동작했습니다.

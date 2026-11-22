@@ -2,7 +2,7 @@
 # k6로 2분간 부하를 건 뒤, 부하가 끝나고 줄어드는 것까지 HPA·파드 수를 10초마다 기록한다
 set -euo pipefail
 cd "$(dirname "$0")/.."
-CTX=kind-chzzk
+CTX=${CTX:-kind-chzzk}   # OCI K3s에서는 CTX=default
 k() { kubectl --context "$CTX" "$@"; }
 LOG=${1:-docs/scale-log.txt}
 mkdir -p "$(dirname "$LOG")"

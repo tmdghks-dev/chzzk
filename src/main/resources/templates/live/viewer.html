@@ -22,7 +22,9 @@
 
 <script th:if="${live.onAir}" th:inline="javascript">
     const liveId = /*[[${live.id}]]*/ 0;
-    const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+    // ICE 서버(STUN + TURN 임시 계정)는 서버에서 받아온다. 셀룰러에서는 TURN이 영상을 중계한다
+    let rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+    const iceReady = fetch('/api/ice').then(r => r.json()).then(c => rtcConfig = c).catch(() => {});
 
     const statusEl = document.getElementById('status');
     const screen = document.getElementById('screen');
@@ -40,6 +42,7 @@
 
         if (msg.type === 'offer') {
             pc?.close();
+            await iceReady;
             pc = new RTCPeerConnection(rtcConfig);
             pc.ontrack = (e) => {
                 screen.srcObject = e.streams[0];

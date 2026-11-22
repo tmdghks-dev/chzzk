@@ -2,19 +2,23 @@
 <html xmlns:th="http://www.thymeleaf.org">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>후원 결제</title>
+    <link rel="stylesheet" href="/app.css">
     <script src="https://js.tosspayments.com/v2/standard"></script>
 </head>
 <body>
-<h1>후원 결제</h1>
-<p>
-    받는 사람: <b th:text="${donation.receiver.username}"></b> /
-    금액: <b th:text="${#numbers.formatInteger(donation.amount, 0, 'COMMA')} + '원'"></b>
-</p>
-
-<div id="payment-method"></div>
-<div id="agreement"></div>
-<button id="pay">결제하기</button>
+<header th:replace="~{fragments/top :: top}"></header>
+<main class="wrap narrow">
+    <h1>후원 결제</h1>
+    <p class="card">
+        받는 사람 <b th:text="${donation.receiver.username}"></b><br>
+        금액 <b class="total" th:text="${#numbers.formatInteger(donation.amount, 0, 'COMMA')} + '원'"></b>
+    </p>
+    <div id="payment-method"></div>
+    <div id="agreement"></div>
+    <button id="pay" style="width:100%">결제하기</button>
+</main>
 
 <script th:inline="javascript">
     const clientKey = [[${clientKey}]];

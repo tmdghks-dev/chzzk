@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<header class="top" th:fragment="top">
+    <a class="logo" href="/broadcasts">치지<b>직</b></a>
+    <span class="sp"></span>
+    <a class="btn danger" href="/lives/new">● 라이브</a>
+    <th:block th:if="${session.memberId}">
+        <span class="who" th:text="${session.username} + '님'"></span>
+        <form method="post" action="/logout"><button class="ghost">로그아웃</button></form>
+    </th:block>
+    <th:block th:unless="${session.memberId}">
+        <a class="btn ghost" href="/login">로그인</a>
+    </th:block>
+</header>
+</body>
+</html>

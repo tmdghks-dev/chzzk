@@ -4,13 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>라이브 시작</title>
+    <link rel="stylesheet" href="/app.css">
 </head>
 <body>
-<h1>라이브 시작</h1>
-<form th:action="@{/lives}" method="post">
-    <input type="text" name="title" placeholder="방송 제목" required>
-    <button type="submit">방송 시작</button>
-</form>
-<a th:href="@{/broadcasts}">목록으로</a>
+<header th:replace="~{fragments/top :: top}"></header>
+<main class="wrap narrow">
+    <h1>라이브 시작</h1>
+    <form class="stack card" th:action="@{/lives}" method="post">
+        <input type="text" name="title" placeholder="방송 제목" required>
+        <button type="submit" class="danger">● 방송 시작</button>
+    </form>
+    <p class="muted">로그인 없이도 방송할 수 있어요. 다음 화면에서 카메라를 켜면 송출이 시작돼요.</p>
+</main>
 </body>
 </html>

@@ -1,14 +1,22 @@
 <!DOCTYPE html>
-<html xmlns:th="http://www.thymeleaf.org">
-<head><meta charset="UTF-8"><title>로그인</title></head>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>로그인</title>
+    <link rel="stylesheet" href="/app.css">
+</head>
 <body>
-<h1>로그인</h1>
-<p th:if="${error}" th:text="${error}" style="color:red"></p>
-<form method="post" action="/login">
-    <input name="username" placeholder="아이디" required><br>
-    <input name="password" type="password" placeholder="비밀번호" required><br>
-    <button>로그인</button>
-</form>
-<a href="/signup">회원가입</a>
+<header th:replace="~{fragments/top :: top}"></header>
+<main class="wrap narrow">
+    <h1>로그인</h1>
+    <p class="err" th:if="${error}" th:text="${error}"></p>
+    <form class="stack card" method="post" action="/login">
+        <input name="username" placeholder="아이디" required>
+        <input name="password" type="password" placeholder="비밀번호" required>
+        <button>로그인</button>
+    </form>
+    <p class="muted">처음이세요? <a href="/signup">회원가입</a></p>
+</main>
 </body>
 </html>

@@ -1,12 +1,20 @@
 <!DOCTYPE html>
-<html xmlns:th="http://www.thymeleaf.org">
-<head><meta charset="UTF-8"><title>방송 등록</title></head>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>영상 등록</title>
+    <link rel="stylesheet" href="/app.css">
+</head>
 <body>
-<h1>방송 등록</h1>
-<form method="post" action="/broadcasts">
-    <input name="title" placeholder="제목" required><br>
-    <input name="videoPath" placeholder="영상 URL (mp4)" required size="60"><br>
-    <button>등록</button>
-</form>
+<header th:replace="~{fragments/top :: top}"></header>
+<main class="wrap narrow">
+    <h1>영상 등록</h1>
+    <form class="stack card" method="post" action="/broadcasts">
+        <input name="title" placeholder="제목" required>
+        <input name="videoPath" placeholder="영상 URL (mp4)" required>
+        <button>등록</button>
+    </form>
+</main>
 </body>
 </html>

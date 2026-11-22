@@ -1,0 +1,14 @@
+{
+  "appId": "dev.tmdghks.chzzk",
+  "appName": "치지직",
+  "webDir": "www",
+  "server": {
+    "url": "https://chzzk.tmdghks.dev/broadcasts",
+    "errorPath": "index.html"
+  },
+  "backgroundColor": "#0b0e1a",
+  "ios": {
+    "contentInset": "always",
+    "backgroundColor": "#0b0e1a"
+  }
+}

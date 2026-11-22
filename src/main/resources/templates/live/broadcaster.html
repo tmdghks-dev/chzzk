@@ -10,7 +10,7 @@
 <header th:replace="~{fragments/top :: top}"></header>
 <main class="wrap">
     <h1 th:text="${live.title}">제목</h1>
-    <video id="preview" class="player cover" autoplay muted playsinline></video>
+    <video id="preview" poster="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" class="player cover" autoplay muted playsinline></video>
     <div class="bar">
         <span class="pill"><span class="live-dot"></span><span id="status">대기 중</span></span>
         <span class="pill">👀 시청자 <span id="count">0</span>명</span>

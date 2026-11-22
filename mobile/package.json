@@ -1,0 +1,14 @@
+{
+  "name": "chzzk-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "치지직 휴대폰 앱 (Android / iPhone), chzzk.tmdghks.dev를 앱으로 띄운다",
+  "dependencies": {
+    "@capacitor/android": "^8.6.2",
+    "@capacitor/core": "^8.6.2",
+    "@capacitor/ios": "^8.6.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.6.2"
+  }
+}

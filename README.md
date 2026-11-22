@@ -9,9 +9,11 @@
 | ③ 로그인·권한·댓글 | 회원가입/로그인, 내 방송만 삭제, 로그인해야 댓글 |
 | ④ 도네이션 | 토스페이먼츠 테스트 결제로 방송자에게 후원 |
 | ⑤ 오토스케일 | 부하가 오르면 서버가 2개 → 5개로 자동으로 늘어남 |
+| ⑥ 도메인·서버·앱 | 내 도메인 + OCI 무료 서버 24시간 운영, 셀룰러 라이브(TURN), PC·Mac·Android·iPhone 앱 |
 
 **사용 기술**: Spring Boot 4.1, Java 25, Thymeleaf, Spring Data JPA, H2(파일 DB), WebSocket, WebRTC, 토스페이먼츠 결제위젯
 ⑤단계만 Docker, kind(로컬 쿠버네티스), PostgreSQL, k6를 추가로 썼습니다.
+⑥단계는 Cloudflare(도메인·DNS·터널), OCI(ARM 서버), coturn(TURN), Electron(PC·Mac 앱), Capacitor(휴대폰 앱), GitHub Actions를 썼습니다.
 
 ## 테스트할 때 쓰는 링크
 
@@ -24,7 +26,9 @@
 | 빅 벅 버니 (10초) | `https://www.w3schools.com/html/mov_bbb.mp4` |
 | 샘플 (5초) | `https://download.samplelib.com/mp4/sample-5s.mp4` |
 
-**내 사이트** (서버를 켠 상태에서)
+**배포된 사이트**: <https://chzzk.tmdghks.dev> · 앱 다운로드 <https://tmdghks.dev/download/>
+
+**내 사이트** (로컬에서 서버를 켠 상태에서)
 
 | 화면 | 주소 |
 | --- | --- |
@@ -253,3 +257,137 @@ DB 비밀번호는 `cluster-up.sh`가 랜덤으로 만들어서 쿠버네티스 
 
 - **부하 결과** ([docs/k6-summary.txt](docs/k6-summary.txt)): 2분 동안 요청 561,085건(초당 약 4,674건), 실패 0%, 평균 응답 10.65ms
 - **로그인 유지** ([docs/session-check-log.txt](docs/session-check-log.txt)): 로그인한 상태로 15초마다 22번 요청했습니다. 응답한 서버가 5개로 바뀌는 동안에도 **22번 모두 로그인 상태와 댓글이 그대로** 나왔습니다.
+
+---
+
+## ⑥ 내 도메인 + OCI 서버 + 앱 배포
+
+치지직을 내 도메인 **<https://chzzk.tmdghks.dev>** 에 올리고, OCI 무료 서버에서 24시간 돌립니다. PC·Mac·Android·iPhone 앱으로도 쓸 수 있습니다.
+
+| 항목 | 주소 |
+| --- | --- |
+| 서비스 | <https://chzzk.tmdghks.dev> |
+| 상태 확인 (health) | <https://chzzk.tmdghks.dev/actuator/health> → `{"status":"UP"}` |
+| 앱 다운로드 | <https://tmdghks.dev/download/> |
+| 포트폴리오 | <https://tmdghks.dev> |
+
+### 전체 구조
+
+```
+                ┌──────────── Cloudflare ────────────┐
+브라우저·앱 ──▶ │ DNS · HTTPS 인증서 · DDoS 보호       │ ──(Cloudflare Tunnel)──┐
+                └────────────────────────────────────┘                        ▼
+                                                    ┌──── OCI 서버 (싱가포르, ARM) ────┐
+                                                    │ cloudflared  →  chzzk (Docker)   │
+휴대폰 셀룰러 라이브 영상 ─────(UDP 3478)─────────▶ │ coturn (TURN 중계)               │
+                                                    └──────────────────────────────────┘
+```
+
+- 서버는 **들어오는 웹 포트(80/443)를 열지 않습니다.** 서버 안의 `cloudflared`가 Cloudflare 쪽으로 먼저 연결을 열고, 그 연결로 요청을 받습니다. 공격받을 수 있는 입구가 줄어듭니다.
+- 열린 포트는 SSH(22)와 TURN(3478, 49160~49200/udp)뿐입니다.
+
+### 도메인 (Cloudflare)
+
+| 항목 | 내용 |
+| --- | --- |
+| 도메인 | `tmdghks.dev` (2026-11-20 구매, 1년) |
+| 등록 기관 | Cloudflare Registrar |
+| 비용 | **약 $12.20 / 년** (Cloudflare는 등록 원가에 팔아서 .dev 중 가장 쌈. 다른 곳은 $12~21) |
+| 서브도메인 | `chzzk.tmdghks.dev` → 터널(CNAME), `tmdghks.dev` → Cloudflare Pages(포트폴리오·다운로드 페이지) |
+
+**DNS·HTTPS**
+
+- 네임서버가 Cloudflare라서 DNS 레코드를 대시보드나 `cloudflared tunnel route dns`로 바로 추가합니다.
+- HTTPS 인증서는 Cloudflare가 자동으로 발급·갱신합니다. 서버에는 인증서를 둘 필요가 없습니다.
+- `.dev`는 브라우저가 **HTTPS만 허용(HSTS preload)** 하는 도메인이라 http로는 접속되지 않습니다.
+- 휴대폰 카메라(getUserMedia)는 HTTPS에서만 켜지므로 라이브에도 꼭 필요합니다.
+- 스프링은 `server.forward-headers-strategy=native`로 프록시가 넘겨준 `https` 정보를 그대로 써서, 리다이렉트 주소가 `https://`로 나갑니다.
+
+### 서버 (OCI Always Free)
+
+| 항목 | 선택 | 이유 |
+| --- | --- | --- |
+| 리전 | 싱가포르 (`ap-singapore-1`) | 가입할 때 정한 홈 리전. 무료 서버는 홈 리전에서만 만들 수 있음. 한국과 가까워 지연이 적음 |
+| 모양 | **VM.Standard.A1.Flex (ARM)** 2 OCPU / 12GB | Always Free 중 가장 좋은 사양(ARM 합계 4 OCPU / 24GB까지 무료). x86 무료 서버(E2.1.Micro)는 1/8 코어·1GB라 스프링+TURN을 돌리기 부족 |
+| OS | Ubuntu 24.04 (aarch64) | |
+| 디스크 | 부트 볼륨 47GB | 무료 한도 200GB 안 |
+
+- 싱가포르의 A1 자리가 계속 없어서("Out of host capacity") OCI CLI로 **자동 재시도 스크립트**를 돌렸습니다. 200번 넘게 실패했습니다.
+- 계정을 **Pay As You Go**로 전환하자 몇 분 만에 생성됐습니다. 무료 한도 안에서만 쓰면 요금은 0원입니다.
+- 혹시 모를 요금에 대비해 **$1 예산 + 알림**을 걸어 두었습니다. 실제 요금이나 예상 요금이 생기면 메일이 옵니다.
+- 4 OCPU / 24GB 대신 2 / 12로 시작한 건 자리를 잡기 쉬워서입니다. 무료 한도 안에서 나중에 늘릴 수 있습니다.
+
+### 서버에서 도는 것
+
+| 이름 | 방식 | 역할 |
+| --- | --- | --- |
+| `chzzk` | Docker 컨테이너 (`--restart unless-stopped`) | 스프링 앱. H2 파일 DB는 볼륨 `~/chzzk-data`에 저장 |
+| `cloudflared` | systemd 서비스 | `chzzk.tmdghks.dev` → `localhost:8091` 터널 |
+| `coturn` | systemd 서비스 | 셀룰러 라이브용 TURN 중계 |
+
+세 개 모두 서버가 재부팅되면 자동으로 다시 켜집니다.
+
+**배포** (내 Mac에서 한 줄. 소스 복사 → 서버에서 ARM 이미지 빌드 → 컨테이너 교체)
+
+```bash
+rsync -az --delete --exclude build --exclude .gradle --exclude data --exclude mobile --exclude desktop \
+  --exclude node_modules --exclude .git ./ ubuntu@<서버IP>:~/chzzk/
+ssh ubuntu@<서버IP> 'cd ~/chzzk && sudo docker build -q -t chzzk . && sudo docker rm -f chzzk && \
+  sudo docker run -d --name chzzk --restart unless-stopped -p 127.0.0.1:8091:8091 \
+  -v /home/ubuntu/chzzk-data:/app/data -e JAVA_TOOL_OPTIONS=-Xmx1g \
+  -e TURN_URL=turn:<서버IP>:3478 -e TURN_SECRET="$(cat ~/.turn-secret)" chzzk'
+```
+
+### 셀룰러에서도 라이브 되게 (TURN)
+
+- 와이파이에서는 되는데 **LTE·5G에서는 라이브 화면이 안 나왔습니다.**
+- 원인: 통신사망은 휴대폰을 여러 겹의 NAT(CGNAT) 뒤에 두어서, WebRTC가 STUN만으로는 상대를 찾지 못합니다.
+- 해결: 서버에 **coturn**을 설치해서, 직접 연결이 안 되면 TURN이 영상을 중계하게 했습니다.
+
+| 설정 | 값 |
+| --- | --- |
+| 포트 | 3478 (udp/tcp), 중계 포트 49160~49200/udp |
+| 인증 | `use-auth-secret`: 비밀값으로 **12시간짜리 임시 계정**을 그때그때 만듦 |
+| 보호 | 사설망(10.x, 172.16.x, 192.168.x, 127.x)으로는 중계 금지 |
+
+- 브라우저는 방송·시청 전에 `GET /api/ice`([IceController](src/main/java/com/chzzk/live/IceController.java))에서 ICE 서버 목록을 받습니다.
+  - 목록 내용: STUN + TURN 주소, 임시 아이디, 비밀번호
+  - 비밀번호 = `base64(HMAC-SHA1(비밀값, "만료시각:chzzk"))`
+  - 비밀값은 서버 환경변수(`TURN_SECRET`)에만 있고, 코드와 화면에는 없습니다.
+- `TURN_URL`·`TURN_SECRET`이 없으면 예전처럼 STUN만 내려줍니다. 로컬 개발은 그대로 됩니다.
+- OCI는 클라우드 방화벽(보안 목록)과 우분투 `iptables` 둘 다 열어야 합니다. 보안 목록만 열면 막힙니다.
+
+### 앱 (PC · Mac · Android · iPhone)
+
+모든 앱은 `chzzk.tmdghks.dev` 화면을 앱 창에 띄우는 방식입니다. 서버를 고치면 앱을 다시 배포하지 않아도 바로 반영됩니다.
+
+| 플랫폼 | 만든 방법 | 받는 곳 |
+| --- | --- | --- |
+| Windows | Electron ([desktop/](desktop)) → `chzzk-win-x64.exe` | 다운로드 페이지 |
+| macOS | Electron → `chzzk-mac-universal.dmg` (Apple Silicon·Intel) | 다운로드 페이지 |
+| Android | Capacitor ([mobile/](mobile)) → `chzzk-android.apk` (정식 서명) | 다운로드 페이지 |
+| iPhone | Capacitor → TestFlight | 내부 테스터 |
+
+- **자동 빌드**: `v1.2.0` 같은 태그를 push 하면 [GitHub Actions](.github/workflows/apps.yml)가 Windows·macOS·Android를 각각의 러너에서 빌드해서 GitHub Release 하나에 올립니다.
+  - 다운로드 페이지는 `releases/latest/download/...` 고정 주소라 새 버전이 나오면 자동으로 최신을 받습니다.
+- **카메라·마이크 권한**: Android 매니페스트, iOS `Info.plist`, macOS `extendInfo`에 넣었습니다. 앱에서도 라이브 송출이 됩니다.
+- Android 서명 키는 저장소에 넣지 않고 GitHub Secrets(`ANDROID_KEYSTORE_B64`, `ANDROID_KEYSTORE_PASSWORD`)로 넘깁니다.
+
+### 겪은 문제
+
+| 문제 | 원인 | 해결 |
+| --- | --- | --- |
+| Mac 앱이 켜자마자 꺼짐 | Electron 앱 이름(`productName`)을 한글 `치지직`으로 지음 | 내부 이름은 `Chzzk`, 화면 표시 이름만 한글(`CFBundleDisplayName`) |
+| iPhone 앱에서 로그인 누르면 Safari로 넘어감 | 앱 시작 주소가 `/broadcasts`라, 그 주소로 시작하지 않는 페이지는 밖으로 보냄 | 시작 주소를 사이트 루트로 바꾸고 `/` → `/broadcasts` 리다이렉트 추가 |
+| iPhone 상단 바가 시계와 겹침 | 웹뷰가 화면 끝까지 차지 | Capacitor `ios.contentInset: always` |
+| Android 영상 자리에 회색 재생 아이콘 | 안드로이드 웹뷰 기본 포스터 | `<video poster>`에 투명 이미지 |
+| OCI 서버 생성 실패 | 싱가포르 A1 자리 부족 | CLI 자동 재시도 + Pay As You Go 전환 |
+
+### 직접 해 본 결과 (2026-11-22)
+
+- `https://chzzk.tmdghks.dev/actuator/health` → `{"status":"UP"}`. Mac을 꺼도 접속됩니다.
+- 브라우저에서 TURN만 쓰도록 강제(`iceTransportPolicy: 'relay'`) → 서버 공인 IP의 `typ relay` 후보가 잡힘
+- **휴대폰 셀룰러(와이파이 끔)로 앱에서 라이브 송출 → 다른 기기에서 시청 성공**
+- Android 에뮬레이터: 앱 설치 → 라이브 시작 → 카메라 권한 허용 → "방송 중"
+- Mac: GitHub Actions가 만든 `.dmg`를 받아 실행 확인
+- iPhone: TestFlight로 설치 → 로그인·라이브 확인
